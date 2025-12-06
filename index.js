@@ -5,6 +5,7 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
 const stripe = require("stripe")(process.env.STRIPE_KEY);
+console.log(process.env.STRIPE_KEY);
 
 // const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
 //   "utf-8"
@@ -160,9 +161,7 @@ async function run() {
     // payment api
     app.post("/create-checkout-session", verifyJWT, async (req, res) => {
       try {
-        const { email } = req.decodedEmail;
-        console.log(email);
-
+        const email = req.tokenEmail;
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
           payment_method_types: ["card"],
@@ -170,33 +169,67 @@ async function run() {
           line_items: [
             {
               price_data: {
-                currency: "bdt", // Bangladeshi Taka
+                currency: "bdt",
                 product_data: {
                   name: "Digital Life Lessons – Premium Plan (Lifetime Access)",
                 },
-                unit_amount: 150000, // 1500 * 100
+                unit_amount: 150000,
               },
               quantity: 1,
             },
           ],
 
-          customer_email: email, // Who is buying premium
+          customer_email: email,
 
           metadata: {
-            userEmail: email, // For webhook to update MongoDB
+            userEmail: email,
             plan: "Premium Lifetime",
           },
 
-          success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+          success_url: `${process.env.CLIENT_URL}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.CLIENT_URL}/upgrade/cancel`,
         });
 
         res.send({ url: session.url });
       } catch (error) {
-        console.error("Checkout Session Error:", error);
         res
           .status(500)
           .send({ error: "Failed to create Stripe checkout session" });
+      }
+    });
+    app.patch("/session-status", async (req, res) => {
+      try {
+        const sessionId = req.query.session_id;
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const transactionId = session.payment_intent;
+        const query = { transactionId: transactionId };
+        const existingPayment = await userCollection.findOne(query);
+        if (existingPayment) {
+          return res.send({
+            success: false,
+            message: "Payment already processed",
+            transactionId: transactionId,
+          });
+        }
+        if (session.payment_status === "paid") {
+          const userQuery = { email: session.customer_details.email };
+          const update = {
+            $set: {
+              isPremium: true,
+              transactionId: transactionId,
+            },
+          };
+          const result = await userCollection.updateOne(userQuery, update);
+          res.status(200).json({
+            success: true,
+            transactionId: transactionId,
+            result,
+          });
+        }
+      } catch (error) {
+        res
+          .status(500)
+          .send({ error: "Failed to retrieve Stripe checkout session" });
       }
     });
 
