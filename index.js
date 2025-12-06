@@ -4,6 +4,8 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
+const stripe = require("stripe")(process.env.STRIPE_KEY);
+
 // const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
 //   "utf-8"
 // );
@@ -36,7 +38,6 @@ admin.initializeApp({
 // jwt middlewares
 const verifyJWT = async (req, res, next) => {
   const token = req?.headers?.authorization?.split(" ")[1];
-  console.log(token);
   if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
   try {
     const decoded = await admin.auth().verifyIdToken(token);
