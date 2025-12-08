@@ -168,29 +168,35 @@ async function run() {
         });
       }
     });
-    app.patch("/lesson/:id/comment", verifyJWT, async (req, res) => {
+    app.patch("/lesson/:id/comments", verifyJWT, async (req, res) => {
       try {
-        const { email } = req.body;
+        const email = req.tokenEmail;
+        const { text } = req.body;
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
-        const update = {
-          $addToSet: { likes: email },
+
+        const commentObj = {
+          userEmail: email,
+          text,
+          createdAt: new Date(),
         };
-        console.log(email, id, update);
-        const result = await lessonsCollection.updateOne(query, update);
+
+        const result = await lessonsCollection.updateOne(query, {
+          $push: { comments: commentObj },
+        });
+
         res.status(200).json({
-          message: "Like add successfully",
+          message: "Comment added successfully",
           result,
         });
       } catch (error) {
-        res.status(400).json({
-          message: "Failed to add  Like",
-          error: error.message,
-        });
+        res
+          .status(400)
+          .json({ message: "Failed to add comment", error: error.message });
       }
-    }); // incomplete
+    });
 
-    app.post("/report", verifyAdmin, async (req, res) => {
+    app.post("/report", verifyJWT, async (req, res) => {
       try {
         const data = req.body;
         const result = await reportCollection.insertOne(data);
