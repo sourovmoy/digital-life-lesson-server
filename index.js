@@ -56,6 +56,7 @@ async function run() {
     const database = client.db("digital-life-lessons");
     const userCollection = database.collection("users");
     const lessonsCollection = database.collection("lessons");
+    const reportCollection = database.collection("reports");
 
     // middleware
     const verifyAdmin = async (req, res, next) => {
@@ -184,6 +185,22 @@ async function run() {
       } catch (error) {
         res.status(400).json({
           message: "Failed to add  Like",
+          error: error.message,
+        });
+      }
+    }); // incomplete
+
+    app.post("/report", verifyAdmin, async (req, res) => {
+      try {
+        const data = req.body;
+        const result = await reportCollection.insertOne(data);
+        res.status(200).json({
+          message: "Report add to database",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't store report to database",
           error: error.message,
         });
       }
