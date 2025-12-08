@@ -86,11 +86,31 @@ async function run() {
         });
       }
     });
-    app.get("/lessons", async (req, res) => {
+    app.get("/public-lessons", async (req, res) => {
       try {
-        const { visibility } = req.query;
+        const result = await lessonsCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.status(200).json({
+          message: "All lessons",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't get lesson to database",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/lessons", verifyJWT, async (req, res) => {
+      try {
+        const { visibility, email } = req.query;
 
         const query = {};
+        if (email) {
+          query["creator.email"] = email;
+        }
         if (visibility) {
           query.visibility = visibility;
         }
@@ -110,7 +130,7 @@ async function run() {
       }
     });
 
-    app.get("/lessons/:id", async (req, res) => {
+    app.get("/lessons/:id", verifyJWT, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
@@ -129,6 +149,27 @@ async function run() {
     app.patch("/lesson/:id/likes", verifyJWT, async (req, res) => {
       try {
         const email = req.tokenEmail;
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $addToSet: { likes: email },
+        };
+        console.log(email, id, update);
+        const result = await lessonsCollection.updateOne(query, update);
+        res.status(200).json({
+          message: "Like add successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Failed to add  Like",
+          error: error.message,
+        });
+      }
+    });
+    app.patch("/lesson/:id/comment", verifyJWT, async (req, res) => {
+      try {
+        const { email } = req.body;
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const update = {
