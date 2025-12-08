@@ -1,19 +1,18 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
 const stripe = require("stripe")(process.env.STRIPE_KEY);
-console.log(process.env.STRIPE_KEY);
 
-// const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
-//   "utf-8"
-// );
-// const serviceAccount = JSON.parse(decoded);
-// admin.initializeApp({
-//   credential: admin.credential.cert(serviceAccount),
-// });
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf-8"
+);
+const serviceAccount = JSON.parse(decoded);
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const app = express();
 // middleware
@@ -29,12 +28,6 @@ app.use(
   })
 );
 app.use(express.json());
-
-const serviceAccount = require("./digital-life-lessons.json");
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
 
 // jwt middlewares
 const verifyJWT = async (req, res, next) => {
@@ -62,7 +55,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     const database = client.db("digital-life-lessons");
     const userCollection = database.collection("users");
-    const paymentCollection = database.collection("payments");
+    const lessonsCollection = database.collection("lessons");
 
     // middleware
     const verifyAdmin = async (req, res, next) => {
@@ -76,6 +69,85 @@ async function run() {
       }
       next();
     };
+
+    // Lessons apis
+    app.post("/lessons", verifyJWT, async (req, res) => {
+      try {
+        const lesson = req.body;
+        const result = await lessonsCollection.insertOne(lesson);
+        res.status(200).json({
+          message: "Lesson created",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't create lesson to database",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/lessons", async (req, res) => {
+      try {
+        const { visibility } = req.query;
+
+        const query = {};
+        if (visibility) {
+          query.visibility = visibility;
+        }
+        const result = await lessonsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.status(200).json({
+          message: "All lessons",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't get lesson to database",
+          error: error.message,
+        });
+      }
+    });
+
+    app.get("/lessons/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await lessonsCollection.findOne(query);
+        res.status(200).json({
+          message: "Get the lesson",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't get any lesson to database",
+          error: error.message,
+        });
+      }
+    });
+    app.patch("/lesson/:id/likes", verifyJWT, async (req, res) => {
+      try {
+        const email = req.tokenEmail;
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $addToSet: { likes: email },
+        };
+        console.log(email, id, update);
+        const result = await lessonsCollection.updateOne(query, update);
+        res.status(200).json({
+          message: "Like add successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Failed to add  Like",
+          error: error.message,
+        });
+      }
+    });
+
     // Users api
     app.post("/users", async (req, res) => {
       try {
@@ -120,7 +192,7 @@ async function run() {
         });
       }
     });
-    app.get("users/:id/role", verifyJWT, verifyAdmin, async (req, res) => {
+    app.patch("users/:id/role", verifyJWT, verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const data = req.body;
@@ -149,6 +221,7 @@ async function run() {
         const user = await userCollection.findOne(query);
         res.status(200).json({
           role: user?.role || "user",
+          isPremium: user?.isPremium || false,
         });
       } catch (error) {
         res.status(400).json({
