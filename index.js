@@ -107,6 +107,7 @@ async function run() {
     app.get("/lessons", verifyJWT, async (req, res) => {
       try {
         const { visibility, email, emotionalTone, category } = req.query;
+        console.log(category);
 
         const query = {};
         if (email) {
@@ -158,10 +159,20 @@ async function run() {
         const email = req.tokenEmail;
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
-        const update = {
-          $addToSet: { likes: email },
-        };
-        console.log(email, id, update);
+        const lesson = await lessonsCollection.findOne(query);
+
+        if (!lesson) {
+          return res.status(404).json({ message: "Lesson not found" });
+        }
+
+        let update = {};
+        if (lesson.likes?.includes(email)) {
+          update = { $pull: { likes: email } };
+        } else {
+          update = { $addToSet: { likes: email } };
+        }
+        console.log(update);
+
         const result = await lessonsCollection.updateOne(query, update);
         res.status(200).json({
           message: "Like add successfully",
@@ -177,14 +188,14 @@ async function run() {
     app.patch("/lesson/:id/comments", verifyJWT, async (req, res) => {
       try {
         const email = req.tokenEmail;
-        const { text, userName } = req.body;
+        const { comment, name } = req.body;
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
 
         const commentObj = {
-          userName,
-          userEmail: email,
-          text,
+          name,
+          email,
+          comment,
           createdAt: new Date(),
         };
 
