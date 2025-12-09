@@ -106,7 +106,7 @@ async function run() {
     });
     app.get("/lessons", verifyJWT, async (req, res) => {
       try {
-        const { visibility, email } = req.query;
+        const { visibility, email, emotionalTone, category } = req.query;
 
         const query = {};
         if (email) {
@@ -114,6 +114,12 @@ async function run() {
         }
         if (visibility) {
           query.visibility = visibility;
+        }
+        if (emotionalTone) {
+          query.emotionalTone = emotionalTone;
+        }
+        if (category) {
+          query.category = category;
         }
         const result = await lessonsCollection
           .find(query)
@@ -171,11 +177,12 @@ async function run() {
     app.patch("/lesson/:id/comments", verifyJWT, async (req, res) => {
       try {
         const email = req.tokenEmail;
-        const { text } = req.body;
+        const { text, userName } = req.body;
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
 
         const commentObj = {
+          userName,
           userEmail: email,
           text,
           createdAt: new Date(),
