@@ -87,6 +87,21 @@ async function run() {
         });
       }
     });
+    app.post("/lessons", verifyJWT, async (req, res) => {
+      try {
+        const lesson = req.body;
+        const result = await lessonsCollection.insertOne(lesson);
+        res.status(200).json({
+          message: "Lesson created",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't create lesson to database",
+          error: error.message,
+        });
+      }
+    });
     app.get("/public-lessons", async (req, res) => {
       try {
         const result = await lessonsCollection
@@ -106,16 +121,19 @@ async function run() {
     });
     app.get("/lessons", verifyJWT, async (req, res) => {
       try {
-        const { visibility, email, emotionalTone, category } = req.query;
-        console.log(category);
-
+        const { visibility, email, emotionalTone, category, favorites } =
+          req.query;
         const query = {};
+        if (favorites === "true") {
+          query.favorites = req.tokenEmail;
+        }
         if (email) {
           query["creator.email"] = email;
         }
         if (visibility) {
           query.visibility = visibility;
         }
+
         if (emotionalTone) {
           query.emotionalTone = emotionalTone;
         }
@@ -133,6 +151,65 @@ async function run() {
       } catch (error) {
         res.status(400).json({
           message: "Can't get lesson to database",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/lessons/featured", async (req, res) => {
+      try {
+        const query = { featured: true };
+        const result = await lessonsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .limit(6)
+          .toArray();
+        res.status(200).json({
+          message: "Featured lessons",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't get Featured lesson to database",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/lessons/most-favorites", async (req, res) => {
+      try {
+        const lessons = await lessonsCollection
+          .find({ visibility: "public" })
+          .sort({ "favorites.length": -1 })
+          .limit(6)
+          .toArray();
+
+        res.status(200).json({ result: lessons });
+      } catch (error) {
+        res.status(500).json({
+          message: "Failed to fetch most favorite lessons",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/users/top-contributors", async (req, res) => {
+      try {
+        const result = await lessonsCollection
+          .aggregate([
+            {
+              $group: {
+                _id: "$creator.email",
+                name: { $first: "$creator.name" },
+                photoURL: { $first: "$creator.photoURL" },
+                totalLessons: { $sum: 1 },
+              },
+            },
+            { $sort: { totalLessons: -1 } },
+            { $limit: 6 },
+          ])
+          .toArray();
+        res.status(200).json({ message: "top contributors", result });
+      } catch (error) {
+        res.status(500).json({
+          message: "Failed to fetch top contributors",
           error: error.message,
         });
       }
@@ -171,7 +248,6 @@ async function run() {
         } else {
           update = { $addToSet: { likes: email } };
         }
-        console.log(update);
 
         const result = await lessonsCollection.updateOne(query, update);
         res.status(200).json({
@@ -211,6 +287,35 @@ async function run() {
         res
           .status(400)
           .json({ message: "Failed to add comment", error: error.message });
+      }
+    });
+    app.patch("/lesson/:id/favorites", verifyJWT, async (req, res) => {
+      try {
+        const email = req.tokenEmail;
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const lesson = await lessonsCollection.findOne(query);
+        let update = {};
+
+        if (!lesson) {
+          return res.status(404).json({ message: "Lesson not found" });
+        }
+        if (lesson.favorites?.includes(email)) {
+          update = { $pull: { favorites: email } };
+        } else {
+          update = { $addToSet: { favorites: email } };
+        }
+
+        const result = await lessonsCollection.updateOne(query, update);
+
+        res.status(200).json({
+          message: "added favorite successfully",
+          result,
+        });
+      } catch (error) {
+        res
+          .status(400)
+          .json({ message: "Failed to add favorite", error: error.message });
       }
     });
 
@@ -308,6 +413,29 @@ async function run() {
       } catch (error) {
         res.status(400).json({
           message: "Failed to get user role",
+          error: error.message,
+        });
+      }
+    });
+    app.patch("/users", verifyJWT, async (req, res) => {
+      try {
+        const email = req.tokenEmail;
+        const { displayName, photoURL } = req.body;
+        const query = {};
+        if (email) {
+          query.email = email;
+        }
+        const update = {
+          displayName,
+          photoURL,
+        };
+        const result = await userCollection.updateOne(query, update);
+        res.status(200).json({
+          message: "Update Profile",
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Failed to update profile",
           error: error.message,
         });
       }
