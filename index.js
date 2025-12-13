@@ -56,11 +56,10 @@ async function run() {
     const database = client.db("digital-life-lessons");
     const userCollection = database.collection("users");
     const lessonsCollection = database.collection("lessons");
-    const reportCollection = database.collection("reports");
 
     // middleware
     const verifyAdmin = async (req, res, next) => {
-      const email = req.decodedEmail;
+      const email = req.tokenEmail;
       const query = { email: email };
       const result = await userCollection.findOne(query);
       if (result?.role !== "admin") {
@@ -72,21 +71,6 @@ async function run() {
     };
 
     // Lessons apis
-    app.post("/lessons", verifyJWT, async (req, res) => {
-      try {
-        const lesson = req.body;
-        const result = await lessonsCollection.insertOne(lesson);
-        res.status(200).json({
-          message: "Lesson created",
-          result,
-        });
-      } catch (error) {
-        res.status(400).json({
-          message: "Can't create lesson to database",
-          error: error.message,
-        });
-      }
-    });
     app.post("/lessons", verifyJWT, async (req, res) => {
       try {
         const lesson = req.body;
@@ -121,8 +105,14 @@ async function run() {
     });
     app.get("/lessons", verifyJWT, async (req, res) => {
       try {
-        const { visibility, email, emotionalTone, category, favorites } =
-          req.query;
+        const {
+          visibility,
+          email,
+          emotionalTone,
+          category,
+          favorites,
+          reports,
+        } = req.query;
         const query = {};
         if (favorites === "true") {
           query.favorites = req.tokenEmail;
@@ -139,6 +129,9 @@ async function run() {
         }
         if (category) {
           query.category = category;
+        }
+        if (reports) {
+          query.reports = { $exists: true, $not: { $size: 0 } }; // it can also done by {$ne:[]}
         }
         const result = await lessonsCollection
           .find(query)
@@ -214,7 +207,6 @@ async function run() {
         });
       }
     });
-
     app.get("/lessons/:id", verifyJWT, async (req, res) => {
       try {
         const id = req.params.id;
@@ -231,6 +223,29 @@ async function run() {
         });
       }
     });
+    app.patch(
+      "/lessons/:id/featured",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const query = { _id: new ObjectId(id) };
+          const result = await lessonsCollection.updateOne(query, {
+            $set: req.body,
+          });
+          res.status(200).json({
+            message: "Featured add successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(400).json({
+            message: "Failed to add  Like",
+            error: error.message,
+          });
+        }
+      }
+    );
     app.patch("/lesson/:id/likes", verifyJWT, async (req, res) => {
       try {
         const email = req.tokenEmail;
@@ -318,11 +333,15 @@ async function run() {
           .json({ message: "Failed to add favorite", error: error.message });
       }
     });
-
-    app.post("/report", verifyJWT, async (req, res) => {
+    app.patch("/report/:id", verifyJWT, async (req, res) => {
       try {
-        const data = req.body;
-        const result = await reportCollection.insertOne(data);
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $addToSet: { reports: req.body },
+        };
+        const result = await lessonsCollection.updateOne(query, update);
+
         res.status(200).json({
           message: "Report add to database",
           result,
@@ -334,7 +353,86 @@ async function run() {
         });
       }
     });
+    app.delete("/lessons/:id", verifyJWT, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await lessonsCollection.deleteOne(query);
+        res.status(200).json({
+          message: "Delete lessons",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't store report to database",
+          error: error.message,
+        });
+      }
+    });
+    app.patch("/lessons/:id", verifyJWT, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updateData = req.body;
+        delete updateData._id;
 
+        const result = await lessonsCollection.updateOne(query, {
+          $set: req.body,
+        });
+        console.log(result);
+
+        res.status(200).json({
+          message: "Data Updated",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Can't update data to database",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/admin/overview", verifyJWT, verifyAdmin, async (req, res) => {
+      try {
+        const totalUser = await userCollection.countDocuments();
+        const totalPublicLessons = await lessonsCollection.countDocuments({
+          visibility: "public",
+        });
+        const totalReportedLessons = await lessonsCollection.countDocuments({
+          reports: { $exists: true, $ne: [] },
+        });
+        const mostActiveContributors = await lessonsCollection
+          .aggregate([
+            {
+              $group: {
+                _id: "$creator.email",
+                lessonCount: { $sum: 1 },
+              },
+            },
+            { $sort: { lessonCount: -1 } },
+            {
+              $project: {
+                _id: 0,
+                email: "$_id",
+                lessonCount: 1,
+              },
+            },
+          ])
+          .toArray();
+        res.status(200).json({
+          message: "all statistic",
+          mostActiveContributors,
+          totalReportedLessons,
+          totalPublicLessons,
+          totalUser,
+        });
+      } catch (error) {
+        res.status(500).json({
+          message: "Failed to load admin dashboard data",
+          error: error.message,
+        });
+      }
+    });
     // Users api
     app.post("/users", async (req, res) => {
       try {
@@ -349,10 +447,10 @@ async function run() {
             user: existingUser,
           });
         }
-        const results = await userCollection.insertOne(user);
+        const result = await userCollection.insertOne(user);
         res.status(201).json({
           message: "Data is stored to database",
-          results,
+          result,
         });
       } catch (error) {
         res.status(400).json({
@@ -364,13 +462,14 @@ async function run() {
 
     app.get("/users", verifyJWT, async (req, res) => {
       try {
-        const results = await userCollection
-          .find()
+        let query = { email: { $ne: req.tokenEmail } };
+        const result = await userCollection
+          .find(query)
           .sort({ create_at: -1 })
           .toArray();
         res.status(200).json({
           message: "all users",
-          results,
+          result,
         });
       } catch (error) {
         res.status(400).json({
@@ -417,21 +516,41 @@ async function run() {
         });
       }
     });
+    // for update profile
     app.patch("/users", verifyJWT, async (req, res) => {
       try {
         const email = req.tokenEmail;
-        const { displayName, photoURL } = req.body;
+
         const query = {};
         if (email) {
           query.email = email;
         }
-        const update = {
-          displayName,
-          photoURL,
-        };
-        const result = await userCollection.updateOne(query, update);
+        const result = await userCollection.updateOne(query, {
+          $set: req.body,
+        });
         res.status(200).json({
           message: "Update Profile",
+          result,
+        });
+      } catch (error) {
+        res.status(400).json({
+          message: "Failed to update profile",
+          error: error.message,
+        });
+      }
+    });
+    // for admin to update role
+    app.patch("/user/:id", verifyJWT, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+
+        const result = await userCollection.updateOne(query, {
+          $set: req.body,
+        });
+        res.status(200).json({
+          message: "Update Profile",
+          result,
         });
       } catch (error) {
         res.status(400).json({
