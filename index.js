@@ -88,21 +88,45 @@ async function run() {
     });
     app.get("/public-lessons", async (req, res) => {
       try {
+        const { limit = 6, skip = 0, category, visibility, search } = req.query;
+
+        const query = {
+          visibility: "public",
+        };
+
+        if (category) {
+          query.category = category;
+        }
+
+        if (visibility) {
+          query.visibility = visibility;
+        }
+
+        if (search) {
+          query.title = { $regex: search, $options: "i" };
+        }
+
+        const total = await lessonsCollection.countDocuments(query);
+
         const result = await lessonsCollection
-          .find()
+          .find(query)
           .sort({ createdAt: -1 })
+          .skip(Number(skip))
+          .limit(Number(limit))
           .toArray();
+
         res.status(200).json({
-          message: "All lessons",
+          total,
           result,
         });
       } catch (error) {
-        res.status(400).json({
-          message: "Can't get lesson to database",
+        res.status(500).json({
+          message: "Can't get lessons",
           error: error.message,
         });
       }
     });
+
     app.get("/lessons", verifyJWT, async (req, res) => {
       try {
         const {
@@ -401,6 +425,84 @@ async function run() {
         const totalReportedLessons = await lessonsCollection.countDocuments({
           reports: { $exists: true, $ne: [] },
         });
+        const now = new Date();
+        const startOfDay = new Date(now);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+
+        const endOfDay = new Date(now);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+
+        const todaysLessons = await lessonsCollection.countDocuments({
+          $expr: {
+            $and: [
+              {
+                $gte: [
+                  { $dateFromString: { dateString: "$createdAt" } },
+                  startOfDay,
+                ],
+              },
+              {
+                $lte: [
+                  { $dateFromString: { dateString: "$createdAt" } },
+                  endOfDay,
+                ],
+              },
+            ],
+          },
+        });
+        const endDate = new Date();
+        endDate.setUTCHours(23, 59, 59, 999);
+
+        const startDate = new Date();
+        startDate.setUTCDate(startDate.getUTCDate() - 6);
+        startDate.setUTCHours(0, 0, 0, 0);
+
+        const lessonsLast7Days = await lessonsCollection
+          .aggregate([
+            {
+              // convert string → Date
+              $addFields: {
+                createdAtDate: { $toDate: "$createdAt" },
+              },
+            },
+            {
+              // filter last 7 days
+              $match: {
+                createdAtDate: {
+                  $gte: startDate,
+                  $lte: endDate,
+                },
+              },
+            },
+            {
+              // group by day
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: "%d-%b-%Y",
+                    date: "$createdAtDate",
+                    timezone: "UTC",
+                  },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            {
+              // rename fields
+              $project: {
+                _id: 0,
+                date: "$_id",
+                count: 1,
+              },
+            },
+            {
+              // latest date first
+              $sort: { date: -1 },
+            },
+          ])
+          .toArray();
+        const users = await userCollection.countDocuments();
+        const lessons = await lessonsCollection.countDocuments();
         const mostActiveContributors = await lessonsCollection
           .aggregate([
             {
@@ -419,12 +521,17 @@ async function run() {
             },
           ])
           .toArray();
+
         res.status(200).json({
           message: "all statistic",
           mostActiveContributors,
           totalReportedLessons,
           totalPublicLessons,
           totalUser,
+          todaysLessons,
+          users,
+          lessons,
+          lessonsLast7Days,
         });
       } catch (error) {
         res.status(500).json({
@@ -433,6 +540,45 @@ async function run() {
         });
       }
     });
+    app.get("/analytics/accessLevel", async (req, res) => {
+      try {
+        const endDate = new Date();
+        endDate.setUTCHours(23, 59, 59, 999);
+
+        const startDate = new Date();
+        startDate.setUTCDate(startDate.getUTCDate() - 6);
+        startDate.setUTCHours(0, 0, 0, 0);
+
+        const data = await lessonsCollection
+          .aggregate([
+            {
+              $match: {
+                createdAt: { $gte: startDate, $lte: endDate },
+                visibility: "public",
+              },
+            },
+            {
+              $group: {
+                _id: "$accessLevel",
+                count: { $sum: 1 },
+              },
+            },
+          ])
+          .toArray();
+
+        // Make sure both free and premium exist
+        const result = ["free", "premium"].map((level) => {
+          const found = data.find((d) => d._id === level);
+          return { accessLevel: level, count: found ? found.count : 0 };
+        });
+
+        res.json(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "AccessLevel analytics failed" });
+      }
+    });
+
     // Users api
     app.post("/users", async (req, res) => {
       try {
@@ -635,7 +781,7 @@ async function run() {
       }
     });
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
