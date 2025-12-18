@@ -22,6 +22,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://b12-m11-session.web.app",
+      "https://digital-life-lessons-to-learn.netlify.app",
     ],
     credentials: true,
     optionSuccessStatus: 200,
@@ -88,7 +89,14 @@ async function run() {
     });
     app.get("/public-lessons", async (req, res) => {
       try {
-        const { limit = 6, skip = 0, category, visibility, search } = req.query;
+        const {
+          limit = 6,
+          skip = 0,
+          category,
+          visibility,
+          search,
+          emotionalTone,
+        } = req.query;
 
         const query = {
           visibility: "public",
@@ -100,6 +108,9 @@ async function run() {
 
         if (visibility) {
           query.visibility = visibility;
+        }
+        if (emotionalTone) {
+          query.emotionalTone = emotionalTone;
         }
 
         if (search) {
