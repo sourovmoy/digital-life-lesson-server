@@ -23,11 +23,13 @@ app.use(
       "http://localhost:5174",
       "https://b12-m11-session.web.app",
       "https://digital-life-lessons-to-learn.netlify.app",
+      "https://digital-life-lesson-client.vercel.app"
     ],
     credentials: true,
     optionSuccessStatus: 200,
   })
 );
+
 app.use(express.json());
 
 // jwt middlewares
